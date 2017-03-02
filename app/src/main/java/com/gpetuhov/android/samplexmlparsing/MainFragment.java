@@ -8,18 +8,31 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import javax.inject.Inject;
+
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.Unbinder;
 
 
-public class MainFragment extends Fragment {
+public class MainFragment extends Fragment implements QuakeFetcher.QuakeFetchedListener {
+
+    // Keeps instance of QuakeFetcher. Injected by Dagger.
+    @Inject QuakeFetcher mQuakeFetcher;
 
     // Displays most recent quake
-    @BindView(R.id.recent_quake_location) TextView mTextView;
+    @BindView(R.id.recent_quake_location) TextView mQuakeLocation;
 
     // Keeps ButterKnife Unbinder object to properly unbind views in onDestroyView of the fragment
     private Unbinder mUnbinder;
+
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // Inject QuakeFetcher instance into this fragment field
+        SampleXMLParsingApp.getAppComponent().inject(this);
+    }
 
     @Nullable
     @Override
@@ -31,7 +44,7 @@ public class MainFragment extends Fragment {
         // Bind views and save reference to Unbinder object
         mUnbinder = ButterKnife.bind(this, v);
 
-        mTextView.setText("Sample text");
+        mQuakeFetcher.fetchQuakes(this);
 
         return v;
     }
@@ -44,4 +57,15 @@ public class MainFragment extends Fragment {
         mUnbinder.unbind();
     }
 
+    // --- QUAKEFETCHER CALLBACKS ----------
+
+    @Override
+    public void onQuakeFetcherSuccess(String quakeLocation) {
+        mQuakeLocation.setText(quakeLocation);
+    }
+
+    @Override
+    public void onQuakeFetcherError() {
+        mQuakeLocation.setText("Error fetching quake");
+    }
 }
