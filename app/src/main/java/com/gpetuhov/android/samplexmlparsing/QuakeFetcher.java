@@ -1,8 +1,13 @@
 package com.gpetuhov.android.samplexmlparsing;
 
 import android.util.Log;
+import android.util.Xml;
+
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.IOException;
+import java.io.InputStream;
 
 import okhttp3.ResponseBody;
 import retrofit2.Call;
@@ -18,6 +23,10 @@ public class QuakeFetcher implements Callback<ResponseBody> {
     private static final String LOG_TAG = QuakeFetcher.class.getName();
 
     private Retrofit mRetrofit;
+
+    // Keeps response from the server converted to InputStream
+    // (this is needed for XMLPullParser).
+    private InputStream mXMLResponse;
 
     // True if quake already fetched
     private boolean mQuakeFetchedFlag = false;
@@ -58,7 +67,7 @@ public class QuakeFetcher implements Callback<ResponseBody> {
 
         // Check if quakes already fetched
         if (mQuakeFetchedFlag) {
-            reportSuccess(mQuakeLocation);
+            reportSuccess();
         } else {
             requestQuakes();
         }
@@ -87,19 +96,13 @@ public class QuakeFetcher implements Callback<ResponseBody> {
     @Override
     public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
 
-        Log.d(LOG_TAG, "Received response from server");
+        Log.d(LOG_TAG, "Received response from the server");
 
-        mQuakeFetchedFlag = true;
+        // Get OkHttp ResponseBody from Retrofit Response and convert it to InputStream
+        mXMLResponse = response.body().byteStream();
 
-        try {
-            // Get OkHttp ResponseBody from Retrofit Response and convert it to String
-            mQuakeLocation = response.body().string();
-            reportSuccess(mQuakeLocation);
-        } catch (IOException e) {
-            Log.d(LOG_TAG, "Error converting response to string");
-            mQuakeFetchedFlag = false;
-            reportError();
-        }
+        // Parse received response
+        parseXMLResponse();
     }
 
     @Override
@@ -107,18 +110,27 @@ public class QuakeFetcher implements Callback<ResponseBody> {
 
         Log.d(LOG_TAG, "Error receiving response from server");
 
-        mQuakeFetchedFlag = false;
         reportError();
     }
 
-    private void reportSuccess(String quakeLocation) {
+    private void reportSuccess() {
+
+        Log.d(LOG_TAG, "Reporting success");
+
+        mQuakeFetchedFlag = true;
+
         if (mQuakeFetchedListener != null) {
-            mQuakeFetchedListener.onQuakeFetcherSuccess(quakeLocation);
+            mQuakeFetchedListener.onQuakeFetcherSuccess(mQuakeLocation);
             unregisterListener();
         }
     }
 
     private void reportError() {
+
+        Log.d(LOG_TAG, "Reporting error");
+
+        mQuakeFetchedFlag = false;
+
         if (mQuakeFetchedListener != null) {
             mQuakeFetchedListener.onQuakeFetcherError();
             unregisterListener();
@@ -130,5 +142,77 @@ public class QuakeFetcher implements Callback<ResponseBody> {
     }
 
     private void parseXMLResponse() {
+        if (mXMLResponse != null) {
+
+            Log.d(LOG_TAG, "Parsing XML...");
+
+            try {
+                // Create new XML parser (ExpatPullParser is used)
+                XmlPullParser parser = Xml.newPullParser();
+
+                // Do not process namespaces
+                parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+
+                // Set received response as input for the parser
+                parser.setInput(mXMLResponse, null);
+
+                // Move to first tag (start the parsing process)
+                parser.nextTag();
+
+                // Get location info of the most recent quake
+                extractMostRecentQuake(parser);
+
+            } catch (XmlPullParserException e) {
+                Log.d(LOG_TAG, "XmlPullParserException");
+                reportError();
+            } catch (IOException e) {
+                Log.d(LOG_TAG, "IOException");
+                reportError();
+            }
+        } else {
+            reportError();
+        }
+    }
+
+    // Search for the first quake in the list and extract its location
+    private void extractMostRecentQuake(XmlPullParser parser) throws XmlPullParserException, IOException {
+
+        Log.d(LOG_TAG, "Searching most recent quake");
+
+        // Get type of current parser event
+        int event = parser.getEventType();
+
+        // Look through entire XML response
+        while (event != XmlPullParser.END_DOCUMENT) {
+
+            // If current event is START_TAG
+            if (event == XmlPullParser.START_TAG) {
+                // Get name of the tag
+                String name = parser.getName();
+
+                // If name of the tag is "text"
+                if (name.equals("text")) {
+
+                    // Move to TEXT event
+                    parser.next();
+
+                    Log.d(LOG_TAG, "Most recent quake found. Getting location");
+
+                    // Get text of the current event (this is quake location info)
+                    mQuakeLocation = parser.getText();
+
+                    // Pass quake location info to the listener and stop parsing
+                    reportSuccess();
+                    return;
+                }
+            }
+
+            // Move to next event
+            event = parser.next();
+        }
+
+        // If we got here, there were no quakes in XML response
+        Log.d(LOG_TAG, "End of document. No quakes found");
+        reportError();
     }
 }
